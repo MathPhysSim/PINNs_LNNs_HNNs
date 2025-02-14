@@ -72,6 +72,7 @@ PINNs and HNNs offer distinct advantages depending on the system being studied. 
 The main scripts are:
 
 [Inverted pendulum PINN.ipynb](Inverted%20pendulum%20PINN.ipynb)
+
 [Damped_pendulum_PINN_and_HNNs.ipynb](Damped_pendulum_PINN_and_HNNs.ipynb)   
 
 git clone https://github.com/MathPhysSim/PINNs_LNNs_HNNs.git
