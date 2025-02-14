@@ -1,5 +1,5 @@
 # PINNs_LNNs_HNNs
-**Created by Simon and Imola**
+**Created by Imola and Simon for the RL coffee**
 
 Welcome to our **PINNs_LNNs_HNNs** repository—an open space for sharing ideas, insights, and experiments related to:
 - **Physics-Informed Neural Networks (PINNs)**
@@ -7,6 +7,7 @@ Welcome to our **PINNs_LNNs_HNNs** repository—an open space for sharing ideas,
 - **Hamiltonian Neural Networks (HNNs)**
 
 Our goal is to explore and explain scientific machine learning. We encourage open discussion, collaboration, and contributions from anyone interested in applying these advanced neural network frameworks to real-world and theoretical problems.
+
 
 ---
 
