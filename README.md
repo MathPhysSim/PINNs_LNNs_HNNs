@@ -8,17 +8,6 @@ Welcome to our **PINNs_LNNs_HNNs** repository—an open space for sharing ideas,
 
 Our goal is to explore and explain scientific machine learning. We encourage open discussion, collaboration, and contributions from anyone interested in applying these advanced neural network frameworks to real-world and theoretical problems.
 
-
----
-
-## Table of Contents
-1. [Getting Started](#getting-started)  
-2. [Contributing](#contributing)  
-3. [License](#license)  
-4. [Contact](#contact)
-
----
-
 ## Getting Started
 1. **Clone the repo**  
    ```bash
