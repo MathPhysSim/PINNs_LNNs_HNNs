@@ -1,4 +1,5 @@
 # PINNs_LNNs_HNNs
+## The beauty of invariants in Scientific ML
 **Created by Imola and Simon for the RL coffee**
 
 Welcome to our **PINNs_LNNs_HNNs** repository—an open space for sharing ideas, insights, and experiments related to:
@@ -77,3 +78,14 @@ The main scripts are:
 
 git clone https://github.com/MathPhysSim/PINNs_LNNs_HNNs.git
 
+## Some insights
+The data:
+![Damped_pendulum_dhnn_data.png](Figures/Damped_pendulum_dhnn_data.png)
+The PINN trained on the pendulum:
+![Damped_pendulum_PINN_vs_Noisy.png](Figures/Damped_pendulum_PINN_vs_Noisy.png)
+We see poor generalisation on unseen data:
+![Damped_pendulum_PINN_vs_Noisy_long.png](Figures/Damped_pendulum_PINN_vs_Noisy_long.png)
+and with a dissipative hamiltonian neural network:
+![DHNN.png](Figures/DHNN.png)
+
+### This demonstrated the power of structuring your function approximator at hand
