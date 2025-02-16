@@ -80,7 +80,7 @@ git clone https://github.com/MathPhysSim/PINNs_LNNs_HNNs.git
 
 ## Some insights
 The data:
-![Damped_pendulum_dhnn_data.png](Figures/Damped_pendulum_dhnn_data.png
+![Damped_pendulum_dhnn_data.png](Figures/Damped_pendulum_dhnn_data.png)
 
 The PINN trained on the pendulum:
 ![Damped_pendulum_PINN_vs_Noisy.png](Figures/Damped_pendulum_PINN_vs_Noisy.png)
