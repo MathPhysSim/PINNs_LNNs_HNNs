@@ -80,12 +80,15 @@ git clone https://github.com/MathPhysSim/PINNs_LNNs_HNNs.git
 
 ## Some insights
 The data:
-![Damped_pendulum_dhnn_data.png](Figures/Damped_pendulum_dhnn_data.png)
+![Damped_pendulum_dhnn_data.png](Figures/Damped_pendulum_dhnn_data.png
+
 The PINN trained on the pendulum:
 ![Damped_pendulum_PINN_vs_Noisy.png](Figures/Damped_pendulum_PINN_vs_Noisy.png)
+
 We see poor generalisation on unseen data:
 ![Damped_pendulum_PINN_vs_Noisy_long.png](Figures/Damped_pendulum_PINN_vs_Noisy_long.png)
+
 and with a dissipative hamiltonian neural network:
 ![DHNN.png](Figures/DHNN.png)
 
-### This demonstrated the power of structuring your function approximator at hand
+### This demonstrates the power of structuring your function approximator at hand
