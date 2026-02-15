@@ -1,94 +1,230 @@
-# PINNs_LNNs_HNNs
-## The beauty of invariants in Scientific ML
-**Created by Imola and Simon for the RL coffee**
+<h1 align="center">PINNs, LNNs & HNNs</h1>
+<h3 align="center">The Beauty of Invariants in Scientific Machine Learning</h3>
 
-Welcome to our **PINNs_LNNs_HNNs** repository—an open space for sharing ideas, insights, and experiments related to:
-- **Physics-Informed Neural Networks (PINNs)**
-- **Lagrangian Neural Networks (LNNs)**
-- **Hamiltonian Neural Networks (HNNs)**
+<p align="center">
+  <strong>Imola Fodor</strong> · <strong>Simon Hirländer</strong><br>
+  <a href="https://github.com/MathPhysSim/PINNs_LNNs_HNNs">Paris Lodron University of Salzburg · Department of Artificial Intelligence and Human Interfaces</a>
+</p>
 
-Our goal is to explore and explain scientific machine learning. We encourage open discussion, collaboration, and contributions from anyone interested in applying these advanced neural network frameworks to real-world and theoretical problems.
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python"></a>
+  <a href="https://pytorch.org/"><img src="https://img.shields.io/badge/PyTorch-1.9%2B-ee4c2c.svg" alt="PyTorch"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"></a>
+</p>
 
-## Physics-Informed Neural Networks (PINNs) for the Damped Pendulum
+<p align="center">
+  <em>Created for the <a href="https://sarl-plus.github.io/reinforcement_learning_coffee/"><strong>RL Coffee</strong></a> — a monthly informal meetup on Reinforcement Learning,<br>
+  held every first Friday of the month at <a href="https://www.plus.ac.at">Paris Lodron University of Salzburg (PLUS)</a>.<br>
+  Presented on <strong>3 January 2025</strong> and <strong>7 February 2025</strong> as <em>"Structured Models in RL"</em>.</em>
+</p>
 
-### Introduction
-Physics-Informed Neural Networks (PINNs) are a class of neural networks that incorporate physical laws, typically represented by differential equations, into the learning process. Unlike traditional neural networks, which rely solely on data, PINNs leverage known physical principles to improve generalization and efficiency, particularly in cases with limited data availability.
+---
 
-### The Damped Pendulum
-The damped pendulum is a classic example of a nonlinear dynamical system. It consists of a mass \( m \) attached to a rod of length \( L \), swinging under the influence of gravity and subject to a damping force.
+## Table of Contents
 
-The equation of motion for the damped pendulum is given by:
+- [Overview](#overview)
+- [Mathematical Background](#mathematical-background)
+  - [Physics-Informed Neural Networks (PINNs)](#physics-informed-neural-networks-pinns)
+  - [Hamiltonian Neural Networks (HNNs)](#hamiltonian-neural-networks-hnns)
+  - [Dissipative Hamiltonian Neural Networks (D-HNNs)](#dissipative-hamiltonian-neural-networks-d-hnns)
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Results](#results)
+- [References](#references)
+- [Citation](#citation)
+- [License](#license)
 
-\[\frac{d^2\theta}{dt^2} + \gamma \frac{d\theta}{dt} + \frac{g}{L} \sin(\theta) = 0\]
+---
 
-where:
-- \( \theta \) is the angular displacement,
-- \( \gamma \) is the damping coefficient,
-- \( g \) is the acceleration due to gravity,
-- \( L \) is the length of the pendulum.
+## Overview
 
-This equation is nonlinear due to the \( \sin(\theta) \) term, making it challenging to solve analytically in general cases.
+This repository provides implementations and experiments comparing three paradigms for learning dynamical systems with *structure-preserving inductive biases*:
 
-### Applying PINNs
-A Physics-Informed Neural Network (PINN) can be used to approximate the solution to this equation by incorporating the governing differential equation into the loss function. The approach involves:
+| Method | Key Idea | Best Suited For |
+|--------|----------|-----------------|
+| **PINNs** | Embed governing PDEs/ODEs directly in the loss function | General differential equations, dissipative systems |
+| **HNNs** | Learn a scalar Hamiltonian; dynamics via symplectic gradient | Conservative systems with energy preservation |
+| **D-HNNs** | Extend HNNs with a Rayleigh dissipation function | Non-conservative systems with energy dissipation |
 
-1. **Neural Network Representation**: A neural network with parameters \( \theta_{NN} \) is designed to approximate the function \( \theta(t) \).
-2. **Loss Function Definition**:
-   - **Data Loss**: If some observational data is available, a mean squared error (MSE) loss can be used to minimize the difference between predicted and observed values.
-   - **Physics Loss**: The residual of the governing equation is computed using automatic differentiation to ensure compliance with physical laws.
-3. **Training**:
-   - The network is trained using standard optimization techniques (e.g., Adam or L-BFGS).
-   - The total loss is the weighted sum of data loss and physics loss.
+The central insight is that **structuring your function approximator to respect physical invariants** (energy conservation, symplecticity, dissipation structure) dramatically improves generalization and long-term prediction stability — even with limited, noisy data.
 
-The PINN minimizes both the observed data error and the physics residual, ensuring that the learned function satisfies the governing equations even in regions where no data is available.
+---
 
-### Advantages of PINNs for the Damped Pendulum
-- **Data Efficiency**: PINNs require fewer data points as they incorporate physical knowledge.
-- **Generalization**: They generalize well beyond training points as they enforce physical constraints.
-- **Handling Noisy Data**: The physics loss acts as a regularizer, making PINNs robust to noise in measurements.
+## Mathematical Background
 
-## Moving to Hamiltonian Neural Networks (HNNs)
-Hamiltonian Neural Networks (HNNs) offer an alternative approach to learning dynamical systems, particularly when the system is conservative or has a known Hamiltonian structure. Unlike PINNs, which explicitly enforce physical laws through the loss function, HNNs learn the underlying energy function governing the system dynamics.
+### Physics-Informed Neural Networks (PINNs)
 
-### Differences Between HNNs and PINNs
-- **Physical Constraint Enforcement**:
-  - PINNs explicitly impose the governing differential equations in the loss function.
-  - HNNs learn the Hamiltonian function, indirectly enforcing conservation laws.
-- **Applicability**:
-  - PINNs can be applied to dissipative systems like the damped pendulum.
-  - HNNs are more suited for conservative systems where energy conservation plays a key role.
-- **Computational Complexity**:
-  - PINNs require automatic differentiation to compute physics residuals.
-  - HNNs leverage learned Hamiltonians and symplectic gradients, often leading to better stability in long-term predictions.
+PINNs incorporate known physical laws into the learning process by adding a *physics residual* to the loss function. For the **damped pendulum**:
 
-### Advantages of HNNs
-- **Implicit Conservation Laws**: Since HNNs learn the Hamiltonian, they inherently conserve energy in conservative systems.
-- **Better Long-Term Prediction**: HNNs often yield more stable solutions over extended time horizons compared to PINNs.
-- **Interpretability**: The learned Hamiltonian function provides insights into the underlying system dynamics.
+$$\frac{d^2\theta}{dt^2} + \gamma \frac{d\theta}{dt} + \frac{g}{L} \sin(\theta) = 0$$
 
-## Conclusion
-PINNs and HNNs offer distinct advantages depending on the system being studied. While PINNs are well-suited for general differential equations, including dissipative systems like the damped pendulum, HNNs excel in modeling conservative systems where energy preservation is crucial. Choosing between the two depends on the nature of the system and the desired properties of the learned model.
+where $\theta$ is angular displacement, $\gamma$ is the damping coefficient, $g$ is gravitational acceleration, and $L$ is the pendulum length.
 
-## Getting Started
-The main scripts are:
+The PINN loss combines a data-fitting term with the physics residual:
 
-[Inverted pendulum PINN.ipynb](Inverted%20pendulum%20PINN.ipynb)
+$$\mathcal{L} = \underbrace{\frac{1}{N}\sum_{i=1}^{N} \|\theta_{\text{NN}}(t_i) - \theta_{\text{obs}}(t_i)\|^2}_{\text{Data Loss}} + \lambda \underbrace{\frac{1}{M}\sum_{j=1}^{M} \|r(t_j;\, \theta_{\text{NN}})\|^2}_{\text{Physics Loss}}$$
 
-[Damped_pendulum_PINN_and_HNNs.ipynb](Damped_pendulum_PINN_and_HNNs.ipynb)   
+where $r(t;\, \theta_{\text{NN}})$ is the ODE residual evaluated using automatic differentiation.
 
+**Advantages:** Data-efficient; generalizes beyond training points; robust to noise via physics regularization.
+
+**Limitation:** No structural guarantee on long-term energy behavior.
+
+### Hamiltonian Neural Networks (HNNs)
+
+HNNs learn a scalar function $H(q, p)$ — the Hamiltonian — and derive dynamics through the *symplectic gradient*:
+
+$$\dot{q} = \frac{\partial H}{\partial p}, \qquad \dot{p} = -\frac{\partial H}{\partial q}$$
+
+This structure **guarantees energy conservation** by construction, since:
+
+$$\frac{dH}{dt} = \frac{\partial H}{\partial q}\dot{q} + \frac{\partial H}{\partial p}\dot{p} = \frac{\partial H}{\partial q}\frac{\partial H}{\partial p} - \frac{\partial H}{\partial p}\frac{\partial H}{\partial q} = 0$$
+
+**Advantages:** Implicit conservation laws; superior long-term stability; interpretable learned Hamiltonian.
+
+### Dissipative Hamiltonian Neural Networks (D-HNNs)
+
+D-HNNs extend HNNs to handle **non-conservative systems** by decomposing the vector field into:
+
+1. A **conservative** component from a Hamiltonian $H(q, p)$ (symplectic gradient)
+2. A **dissipative** component from a Rayleigh function $D(q, p)$ (standard gradient)
+
+$$\dot{\mathbf{x}} = \underbrace{J \nabla H(\mathbf{x})}_{\text{Conservative}} + \underbrace{\nabla D(\mathbf{x})}_{\text{Dissipative}}$$
+
+where $J$ is the symplectic matrix. This decomposition is a learnable Helmholtz–Hodge decomposition of the vector field.
+
+---
+
+## Project Structure
+
+```
+PINNs_LNNs_HNNs/
+├── Damped_pendulum_PINN_and_HNNs.ipynb   # Main notebook: PINN vs HNN vs D-HNN
+├── Inverted pendulum PINN.ipynb           # PINN for the inverted pendulum
+├── Figures/                               # Result visualizations
+│   ├── Damped_pendulum_dhnn_data.png
+│   ├── Damped_pendulum_PINN_vs_Noisy.png
+│   ├── Damped_pendulum_PINN_vs_Noisy_long.png
+│   └── DHNN.png
+├── weights/                               # Pre-trained model weights
+│   ├── hamiltonian_nn_model.pth
+│   ├── hnn_weights.pth
+│   ├── lnn_weights.pth
+│   └── nnn_weights.pth
+├── dissipative_hnn/                       # D-HNN implementation (Sosanya & Greydanus, 2022)
+│   ├── models.py                          #   DHNN, HNN, MLP architectures
+│   ├── train.py                           #   Training loop and hyperparameters
+│   ├── data.py                            #   Synthetic spiral field generation
+│   ├── numeric.py                         #   Numerical Helmholtz decomposition
+│   └── utils.py                           #   Integration and serialization
+├── hamiltonian_nn/                        # HNN implementation (Greydanus et al., 2019)
+│   ├── hnn.py                             #   HNN and PixelHNN models
+│   ├── nn_models.py                       #   MLP and Autoencoder architectures
+│   └── utils.py                           #   RK4 integrator and utilities
+├── requirements.txt
+├── LICENSE
+└── README.md
+```
+
+---
+
+## Installation
+
+```bash
+# Clone the repository
 git clone https://github.com/MathPhysSim/PINNs_LNNs_HNNs.git
+cd PINNs_LNNs_HNNs
 
-## Some insights
-The data:
-![Damped_pendulum_dhnn_data.png](Figures/Damped_pendulum_dhnn_data.png)
+# Create a virtual environment (recommended)
+python -m venv .venv
+source .venv/bin/activate  # macOS/Linux
 
-The PINN trained on the pendulum:
-![Damped_pendulum_PINN_vs_Noisy.png](Figures/Damped_pendulum_PINN_vs_Noisy.png)
+# Install dependencies
+pip install -r requirements.txt
+```
 
-We see poor generalisation on unseen data:
-![Damped_pendulum_PINN_vs_Noisy_long.png](Figures/Damped_pendulum_PINN_vs_Noisy_long.png)
+---
 
-and with a dissipative hamiltonian neural network:
-![DHNN.png](Figures/DHNN.png)
+## Quick Start
 
-### This demonstrates the power of structuring your function approximator at hand
+Open the main notebook to explore the comparison between PINNs, HNNs, and D-HNNs on the damped pendulum:
+
+```bash
+jupyter notebook "Damped_pendulum_PINN_and_HNNs.ipynb"
+```
+
+Or explore the inverted pendulum PINN:
+
+```bash
+jupyter notebook "Inverted pendulum PINN.ipynb"
+```
+
+---
+
+## Results
+
+### Training Data
+
+The damped pendulum trajectory used for training:
+
+![Training data for the damped pendulum](Figures/Damped_pendulum_dhnn_data.png)
+
+### PINN Predictions
+
+The PINN trained on noisy pendulum data — good fit within the training window:
+
+![PINN predictions vs noisy data](Figures/Damped_pendulum_PINN_vs_Noisy.png)
+
+### Generalization Test
+
+Extrapolating beyond the training window reveals poor generalization of the PINN:
+
+![Poor PINN generalization on unseen data](Figures/Damped_pendulum_PINN_vs_Noisy_long.png)
+
+### D-HNN Predictions
+
+The Dissipative Hamiltonian Neural Network maintains physical consistency even far beyond the training data:
+
+![D-HNN predictions with excellent generalization](Figures/DHNN.png)
+
+> **Key takeaway:** Structuring the neural network to respect the underlying physics (Hamiltonian + dissipation) yields dramatically better generalization than encoding physics only through the loss function.
+
+---
+
+## References
+
+1. **Greydanus, S., Dzamba, M. & Yosinski, J.** (2019). *Hamiltonian Neural Networks.* NeurIPS 2019.
+   [arXiv:1906.01563](https://arxiv.org/abs/1906.01563)
+
+2. **Sosanya, A. & Greydanus, S.** (2022). *Dissipative Hamiltonian Neural Networks: A Physics-Inspired Multitask Learning Framework.*
+   [arXiv:2201.10085](https://arxiv.org/abs/2201.10085)
+
+3. **Raissi, M., Perdikaris, P. & Karniadis, G.E.** (2019). *Physics-Informed Neural Networks: A Deep Learning Framework for Solving Forward and Inverse Problems Involving Nonlinear PDEs.* Journal of Computational Physics, 378, 686–707.
+
+4. **Cranmer, M., Greydanus, S., Hoyer, S. et al.** (2020). *Lagrangian Neural Networks.*
+   [arXiv:2003.04630](https://arxiv.org/abs/2003.04630)
+
+---
+
+## Citation
+
+If you use this repository in your research, please cite:
+
+```bibtex
+@misc{fodor2024pinns_lnns_hnns,
+  author       = {Fodor, Imola and Hirl{\"a}nder, Simon},
+  title        = {{PINNs, LNNs \& HNNs}: The Beauty of Invariants in Scientific Machine Learning},
+  year         = {2024},
+  publisher    = {GitHub},
+  howpublished = {\url{https://github.com/MathPhysSim/PINNs_LNNs_HNNs}},
+}
+```
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+**Acknowledgments:** The `hamiltonian_nn` and `dissipative_hnn` modules are based on the original implementations by [Sam Greydanus](https://greydanus.github.io/) and [Andrew Sosanya](https://scholar.google.com/citations?user=RM3NXJAAAAAJ).

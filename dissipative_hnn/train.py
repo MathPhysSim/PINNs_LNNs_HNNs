@@ -1,68 +1,120 @@
-# Dissipative Hamiltonian Neural Networks
-# Andrew Sosanya, Sam Greydanus
+"""Training utilities for Dissipative Hamiltonian Neural Networks.
+
+Provides hyperparameter configuration, batching helpers, and a general-purpose
+training loop for DHNN / HNN / MLP models.
+
+Original authors: Andrew Sosanya, Sam Greydanus (2020)
+"""
 
 import torch
 import numpy as np
-import os, copy, time
-
-# simplifies accessing the hyperparameters.
-class ObjectView(object):
-    def __init__(self, d): self.__dict__ = d
-    
-def get_args(as_dict=False):
-  arg_dict = {'input_dim': 3,
-              'hidden_dim': 256, # capacity
-              'output_dim': 2,
-              'learning_rate': 1e-2, 
-              'test_every': 100,
-              'print_every': 200,
-              'batch_size': 128,
-              'train_split': 0.80,  # train/test dataset percentage
-              'total_steps': 5000,  # because we have a synthetic dataset
-              'device': 'cuda', # {"cpu", "cuda"} for using GPUs
-              'seed': 42,
-              'as_separate': False,
-              'decay': 0}
-  return arg_dict if as_dict else ObjectView(arg_dict)
+import time
+from typing import Dict, List, Any, Union
 
 
-def get_batch(v, step, args):  # helper function for moving batches of data to/from GPU
-  dataset_size, num_features = v.shape
-  bix = (step*args.batch_size) % dataset_size
-  v_batch = v[bix:bix + args.batch_size, :]  # select next batch
-  return torch.tensor(v_batch, requires_grad=True,  dtype=torch.float32, device=args.device)
+class ObjectView:
+    """Lightweight wrapper that exposes a dictionary as object attributes."""
+
+    def __init__(self, d: dict):
+        self.__dict__ = d
 
 
-def train(model, args, data):
-  """ General training function"""
-  model = model.to(args.device)  # put the model on the GPU
-  optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.decay)  # setting the Optimizer
+def get_args(as_dict: bool = False) -> Union[Dict[str, Any], ObjectView]:
+    """Return default hyperparameters for training.
 
-  model.train()     # doesn't make a difference for now
-  t0 = time.time()  # logging the time
-  results = {'train_loss':[], 'test_loss':[], 'test_acc':[], 'global_step':0}  # Logging the results
+    Args:
+        as_dict: If ``True``, return a plain dictionary; otherwise an ``ObjectView``.
 
-  for step in range(args.total_steps):  # training loop 
+    Returns:
+        Hyperparameter configuration.
+    """
+    arg_dict = {
+        "input_dim": 3,
+        "hidden_dim": 256,
+        "output_dim": 2,
+        "learning_rate": 1e-2,
+        "test_every": 100,
+        "print_every": 200,
+        "batch_size": 128,
+        "train_split": 0.80,
+        "total_steps": 5000,
+        "device": "cuda",
+        "seed": 42,
+        "as_separate": False,
+        "decay": 0,
+    }
+    return arg_dict if as_dict else ObjectView(arg_dict)
 
-    x, t, dx = [get_batch(data[k], step, args) for k in ['x', 't', 'dx']]
-    dx_hat = model(x, t=t)  # feeding forward
-    loss = (dx-dx_hat).pow(2).mean()  # L2 loss function
-    loss.backward(retain_graph=False); optimizer.step(); optimizer.zero_grad()  # backpropogation
 
-    results['train_loss'].append(loss.item())  # logging the training loss
+def get_batch(
+    v: np.ndarray, step: int, args: ObjectView
+) -> torch.Tensor:
+    """Extract a mini-batch from a dataset array and move it to the target device.
 
-    # Testing our data with desired frequency (test_every)
-    if step % args.test_every == 0:
+    Args:
+        v: Full dataset array of shape ``(N, D)``.
+        step: Current training step (used for cycling through data).
+        args: Hyperparameters (must contain ``batch_size`` and ``device``).
 
-      x_test, t_test, dx_test = [get_batch(data[k], step=0, args=args)
-                          for k in ['x_test', 't_test', 'dx_test']]
-      dx_hat_test = model(x_test, t=t_test)  # testing our model. 
-      test_loss = (dx_test-dx_hat_test).pow(2).mean().item() # L2 loss
+    Returns:
+        Batch tensor on the configured device with gradients enabled.
+    """
+    dataset_size, _ = v.shape
+    bix = (step * args.batch_size) % dataset_size
+    v_batch = v[bix : bix + args.batch_size, :]
+    return torch.tensor(v_batch, requires_grad=True, dtype=torch.float32, device=args.device)
 
-      results['test_loss'].append(test_loss)
-    if step % args.print_every == 0:
-      print('step {}, dt {:.3f}, train_loss {:.2e}, test_loss {:.2e}'
-            .format(step, time.time()-t0, loss.item(), test_loss)) #.item() is just the integer of PyTorch scalar. 
-      t0 = time.time()
-  model = model.cpu()
-  return results
+
+def train(
+    model: torch.nn.Module, args: ObjectView, data: Dict[str, np.ndarray]
+) -> Dict[str, List[float]]:
+    """Train a model with L2 loss and Adam optimizer.
+
+    Args:
+        model: A DHNN, HNN, or MLP model.
+        args: Hyperparameters.
+        data: Dataset dictionary with keys ``'x'``, ``'t'``, ``'dx'``,
+              ``'x_test'``, ``'t_test'``, ``'dx_test'``.
+
+    Returns:
+        Dictionary of training and test losses per step.
+    """
+    model = model.to(args.device)
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=args.learning_rate, weight_decay=args.decay
+    )
+
+    model.train()
+    t0 = time.time()
+    results: Dict[str, List[float]] = {
+        "train_loss": [], "test_loss": [], "test_acc": [], "global_step": 0
+    }
+
+    for step in range(args.total_steps):
+        x, t, dx = [get_batch(data[k], step, args) for k in ["x", "t", "dx"]]
+        dx_hat = model(x, t=t)
+        loss = (dx - dx_hat).pow(2).mean()
+
+        loss.backward(retain_graph=False)
+        optimizer.step()
+        optimizer.zero_grad()
+
+        results["train_loss"].append(loss.item())
+
+        if step % args.test_every == 0:
+            x_test, t_test, dx_test = [
+                get_batch(data[k], step=0, args=args) for k in ["x_test", "t_test", "dx_test"]
+            ]
+            dx_hat_test = model(x_test, t=t_test)
+            test_loss = (dx_test - dx_hat_test).pow(2).mean().item()
+            results["test_loss"].append(test_loss)
+
+        if step % args.print_every == 0:
+            print(
+                f"step {step}, dt {time.time() - t0:.3f}, "
+                f"train_loss {loss.item():.2e}, test_loss {test_loss:.2e}"
+            )
+            t0 = time.time()
+
+    model = model.cpu()
+    return results
