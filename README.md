@@ -31,6 +31,7 @@
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Results](#results)
+- [Recent Developments & State of the Art](#recent-developments--state-of-the-art-20252026)
 - [References](#references)
 - [Citation](#citation)
 - [License](#license)
@@ -189,6 +190,21 @@ The Dissipative Hamiltonian Neural Network maintains physical consistency even f
 ![D-HNN predictions with excellent generalization](Figures/DHNN.png)
 
 > **Key takeaway:** Structuring the neural network to respect the underlying physics (Hamiltonian + dissipation) yields dramatically better generalization than encoding physics only through the loss function.
+
+---
+
+## Recent Developments & State of the Art (2025/2026)
+
+While the models implemented in this repository (PINNs, HNNs, LNNs, and D-HNNs) represent foundational milestones of scientific machine learning, the field has evolved rapidly toward more scalable and generalizable architectures. Key recent advancements include:
+
+*   **Beyond PINNs (Solvers to Operators):**
+    *   **Neural Operators (FNOs & DeepONets):** Instead of learning the solution to one specific equation, these operators learn mappings between function spaces. They are resolution-invariant and can evaluate new boundary conditions in zero-shot inference, often running orders of magnitude faster than traditional PDE solvers.
+    *   **PIKANs (Physics-Informed Kolmogorov-Arnold Networks):** Replacing MLPs with learnable univariate functions on edges (Kolmogorov-Arnold Networks), providing better parameter efficiency and mitigating the spectral bias inherent to standard PINNs.
+    *   **Bayesian PINNs (B-PINNs):** Extending PINNs to provide rigorous Uncertainty Quantification (UQ) bounds alongside physical estimations, crucial for noisy real-world data.
+*   **Beyond HNNs/LNNs (Advanced Geometric Deep Learning):**
+    *   **Port-Hamiltonian Neural Networks (PHNNs):** The direct evolution of D-HNNs. They allow for the modular interconnection of multiple energetic systems (e.g., coupling mechanical and electrical systems) and guarantee strict energy bounds mathematically, which is critical for robotics and reinforcement learning safety constraints.
+    *   **Koopman Operator World Models:** Lifting nonlinear state spaces into high-dimensional globally linear spaces (Stable Koopman State-Space Models). This provides analytic tractability for optimal control (like LQR/MPC) without sacrificing the richness of the underlying nonlinear physics.
+    *   **Physics-Informed Transformers:** Applying sequence modeling and self-attention to PDE data generation, allowing the ingestion of irregularly sampled sensor data to output full physical fields.
 
 ---
 
