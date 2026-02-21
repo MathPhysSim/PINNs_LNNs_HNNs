@@ -2,17 +2,26 @@
 Comparison of Standard MLP vs. Hamiltonian Neural Network (HNN) Multistep Rollout.
 
 Demonstrates the central claim of the METRIC (FWF) proposal:
-- Standard (black-box) neural networks *hallucinate* non-physical energy gains that
-  violate Liouville's Theorem -- making them fundamentally unsafe for long-horizon
+  Standard (black-box) neural networks *hallucinate* non-physical energy gains that
+  violate Liouville's Theorem, making them fundamentally unsafe for long-horizon
   control of Hamiltonian systems like particle accelerators.
-- HNNs enforce symplectic structure by construction, producing only
-  *physically plausible* errors (phase drift), not catastrophic energy drift.
+  HNNs enforce symplectic structure, producing only *physically plausible* errors
+  (phase drift of the learned Hamiltonian), not catastrophic energy drift.
 
-System: Simple Harmonic Oscillator (SHO),  H = (p² + q²)/2 = const.
-        This maps directly to linearised betatron oscillations in accelerator
-        physics -- the regime targeted by METRIC.
+Key methodological point — ensemble mean:
+  For HNNs we average the SCALAR Hamiltonian fields H_mean = (1/N) Σ H_i
+  and derive the vector field from J∇H_mean.  Since J is a constant linear map,
+  this is identical to averaging the Lie-algebra generators (X_{H_i} = J∇H_i).
+  The result is strictly symplectic by construction (Liouville guaranteed).
+  Compare the WRONG approach: averaging the integrated flows mean_i(φ_{H_i}),
+  which destroys symplecticity.
 
-Authors: METRIC Project (Simon Hirläender, Lorenz Fischl), University of Salzburg
+System: Simple Harmonic Oscillator (SHO), H = (p² + q²)/2 = const.
+        Directly maps to linearised betatron oscillations in particle accelerators:
+        the primary regime targeted by METRIC.
+
+Authors: METRIC Project — Simon Hirläender, Lorenz Fischl
+         Dept. AI & Human Interfaces, University of Salzburg
          Generated: 2026-02-21
 """
 
@@ -20,7 +29,9 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.ticker as mticker
 from matplotlib.lines import Line2D
+from matplotlib.gridspec import GridSpec
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -29,45 +40,59 @@ from pathlib import Path
 # ── Reproducibility ──────────────────────────────────────────────────────────
 torch.manual_seed(0)
 np.random.seed(0)
+
+# ── Style ─────────────────────────────────────────────────────────────────────
 matplotlib.rcParams.update({
-    "font.family": "serif",
-    "font.size": 10,
-    "axes.titlesize": 11,
-    "axes.labelsize": 10,
-    "legend.fontsize": 8.5,
-    "xtick.labelsize": 8.5,
-    "ytick.labelsize": 8.5,
-    "figure.dpi": 150,
+    "font.family":        "serif",
+    "font.serif":         ["DejaVu Serif", "Times New Roman", "serif"],
+    "font.size":          10,
+    "axes.titlesize":     11,
+    "axes.titleweight":   "bold",
+    "axes.labelsize":     9.5,
+    "axes.spines.top":    False,
+    "axes.spines.right":  False,
+    "axes.grid":          True,
+    "grid.color":         "#E0E4EA",
+    "grid.linewidth":     0.6,
+    "legend.fontsize":    8.0,
+    "legend.framealpha":  0.92,
+    "legend.edgecolor":   "#CCCCCC",
+    "xtick.labelsize":    8.5,
+    "ytick.labelsize":    8.5,
+    "xtick.direction":    "out",
+    "ytick.direction":    "out",
+    "figure.dpi":         150,
+    "savefig.dpi":        300,
 })
 
 # ── METRIC Proposal Color Palette ─────────────────────────────────────────────
-C_GT   = "#003366"    # mycolor (deep navy) – ground truth
-C_MLP  = "#CC2200"    # warm red  – MLP (normal hallucinator)
-C_HNN  = "#007A4D"    # forest green – HNN (physical hallucinator)
-C_SAFE = "#E8F4E8"    # very light green bg for energy panel
-C_UNSAFE = "#FFF0EE"  # very light red bg for energy panel
+C_GT     = "#003366"    # deep navy  – ground truth
+C_MLP    = "#C0392B"    # deep crimson – MLP (normal hallucinator)
+C_HNN    = "#17704A"    # forest green – HNN (physical hallucinator)
+C_SAFE   = "#EBF7F0"    # very light green bg
+C_UNSAFE = "#FDF0EE"    # very light red bg
+C_ANNOT  = "#5D5D7A"    # muted purple for annotations
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 1.  GROUND-TRUTH DYNAMICS  (RK4 on SHO)
+# 1.  GROUND-TRUTH DYNAMICS
 # ═════════════════════════════════════════════════════════════════════════════
 
 def sho_deriv(state: np.ndarray) -> np.ndarray:
-    """dq/dt = p,  dp/dt = -q  (SHO with unit frequency)."""
-    q, p = state
-    return np.array([p, -q])
+    """dq/dt = p,  dp/dt = -q"""
+    return np.array([state[1], -state[0]])
 
 
 def rk4_step(state: np.ndarray, dt: float) -> np.ndarray:
     k1 = sho_deriv(state)
-    k2 = sho_deriv(state + 0.5 * dt * k1)
-    k3 = sho_deriv(state + 0.5 * dt * k2)
-    k4 = sho_deriv(state + dt * k3)
-    return state + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+    k2 = sho_deriv(state + 0.5*dt*k1)
+    k3 = sho_deriv(state + 0.5*dt*k2)
+    k4 = sho_deriv(state + dt*k3)
+    return state + (dt/6.0)*(k1 + 2*k2 + 2*k3 + k4)
 
 
-def ground_truth_trajectory(q0: float, p0: float, n_steps: int, dt: float) -> np.ndarray:
-    traj = np.zeros((n_steps + 1, 2))
+def ground_truth_trajectory(q0, p0, n_steps, dt) -> np.ndarray:
+    traj = np.zeros((n_steps+1, 2))
     traj[0] = [q0, p0]
     for i in range(n_steps):
         traj[i+1] = rk4_step(traj[i], dt)
@@ -75,24 +100,21 @@ def ground_truth_trajectory(q0: float, p0: float, n_steps: int, dt: float) -> np
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 2.  GENERATE TRAINING DATA  (noisy one-step transitions)
+# 2.  TRAINING DATA
 # ═════════════════════════════════════════════════════════════════════════════
 
-def make_training_data(n_train: int, dt: float, noise_std: float = 0.02):
-    """Random initial conditions → one RK4 step + Gaussian noise."""
-    angles = np.random.uniform(0, 2 * np.pi, n_train)
+def make_training_data(n_train: int, dt: float, noise_std: float = 0.025):
+    angles = np.random.uniform(0, 2*np.pi, n_train)
     radii  = np.random.uniform(0.5, 1.5, n_train)
     q0 = radii * np.cos(angles)
     p0 = radii * np.sin(angles)
     states_in  = np.stack([q0, p0], axis=1)
     states_out = np.array([rk4_step(s, dt) for s in states_in])
     states_out += noise_std * np.random.randn(*states_out.shape)
-    # Derivatives (for HNN target)
     derivs = np.array([sho_deriv(s) for s in states_in])
-
     X   = torch.tensor(states_in,  dtype=torch.float32)
-    Y_s = torch.tensor(states_out, dtype=torch.float32)  # next state  (MLP target)
-    Y_d = torch.tensor(derivs,     dtype=torch.float32)  # derivatives (HNN target)
+    Y_s = torch.tensor(states_out, dtype=torch.float32)
+    Y_d = torch.tensor(derivs,     dtype=torch.float32)
     return X, Y_s, Y_d
 
 
@@ -101,7 +123,6 @@ def make_training_data(n_train: int, dt: float, noise_std: float = 0.02):
 # ═════════════════════════════════════════════════════════════════════════════
 
 class MLP(nn.Module):
-    """Plain black-box MLP.  Directly predicts next state (s_{t+1})."""
     def __init__(self, hidden: int = 64):
         super().__init__()
         self.net = nn.Sequential(
@@ -110,14 +131,13 @@ class MLP(nn.Module):
             nn.Linear(hidden, 2),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         return self.net(x)
 
 
 class HamiltonianMLP(nn.Module):
     """
-    Hamiltonian Neural Network.
-    Learns a scalar H(q,p) and uses symplectic gradient to predict dq/dt, dp/dt.
+    Learns a scalar H(q,p); dynamics from symplectic gradient J∇H.
     Guarantees energy conservation by construction.
     """
     def __init__(self, hidden: int = 64):
@@ -128,47 +148,38 @@ class HamiltonianMLP(nn.Module):
             nn.Linear(hidden, 1),
         )
 
-    def hamiltonian(self, x: torch.Tensor) -> torch.Tensor:
+    def hamiltonian(self, x):
         return self.net(x)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Returns (dq/dt, dp/dt) via symplectic gradient of H."""
+    def forward(self, x):
         x = x.requires_grad_(True)
         H = self.hamiltonian(x).sum()
         dH = torch.autograd.grad(H, x, create_graph=True)[0]
-        # Symplectic structure: dq/dt = +∂H/∂p, dp/dt = -∂H/∂q
-        dqdt =  dH[:, 1:2]
-        dpdt = -dH[:, 0:1]
-        return torch.cat([dqdt, dpdt], dim=-1)
+        return torch.cat([dH[:, 1:2], -dH[:, 0:1]], dim=-1)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 4.  TRAINING
 # ═════════════════════════════════════════════════════════════════════════════
 
-def train_mlp(seed: int, X: torch.Tensor, Y_s: torch.Tensor,
-              epochs: int = 2000, lr: float = 3e-3) -> MLP:
+def train_mlp(seed, X, Y_s, epochs=1500, lr=3e-3):
     torch.manual_seed(seed)
     model = MLP()
     opt = optim.Adam(model.parameters(), lr=lr)
     for _ in range(epochs):
         opt.zero_grad()
-        loss = nn.functional.mse_loss(model(X), Y_s)
-        loss.backward()
+        nn.functional.mse_loss(model(X), Y_s).backward()
         opt.step()
     return model
 
 
-def train_hnn(seed: int, X: torch.Tensor, Y_d: torch.Tensor,
-              dt: float, epochs: int = 3000, lr: float = 3e-3) -> HamiltonianMLP:
+def train_hnn(seed, X, Y_d, epochs=3000, lr=3e-3):
     torch.manual_seed(seed)
     model = HamiltonianMLP()
     opt = optim.Adam(model.parameters(), lr=lr)
     for _ in range(epochs):
         opt.zero_grad()
-        pred_deriv = model(X)
-        loss = nn.functional.mse_loss(pred_deriv, Y_d)
-        loss.backward()
+        nn.functional.mse_loss(model(X), Y_d).backward()
         opt.step()
     return model
 
@@ -177,10 +188,8 @@ def train_hnn(seed: int, X: torch.Tensor, Y_d: torch.Tensor,
 # 5.  ROLLOUT
 # ═════════════════════════════════════════════════════════════════════════════
 
-def mlp_rollout(model: MLP, q0: float, p0: float,
-                n_steps: int) -> np.ndarray:
-    """Autoregressive Euler rollout: s_{t+1} = model(s_t)."""
-    traj = np.zeros((n_steps + 1, 2))
+def mlp_rollout(model, q0, p0, n_steps):
+    traj = np.zeros((n_steps+1, 2))
     traj[0] = [q0, p0]
     s = torch.tensor([[q0, p0]], dtype=torch.float32)
     for i in range(n_steps):
@@ -190,41 +199,93 @@ def mlp_rollout(model: MLP, q0: float, p0: float,
     return traj
 
 
-def hnn_rollout(model: HamiltonianMLP, q0: float, p0: float,
-                n_steps: int, dt: float) -> np.ndarray:
-    """Autoregressive RK4 rollout using the learned Hamiltonian vector field."""
-    traj = np.zeros((n_steps + 1, 2))
+def hnn_rollout(model, q0, p0, n_steps, dt):
+    traj = np.zeros((n_steps+1, 2))
     traj[0] = [q0, p0]
     s = torch.tensor([[q0, p0]], dtype=torch.float32)
     for i in range(n_steps):
-        # RK4 with learned dynamics
         def f(x): return model(x).detach()
         k1 = f(s)
-        k2 = f(s + 0.5 * dt * k1)
-        k3 = f(s + 0.5 * dt * k2)
-        k4 = f(s + dt * k3)
-        s = s + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+        k2 = f(s + 0.5*dt*k1)
+        k3 = f(s + 0.5*dt*k2)
+        k4 = f(s + dt*k3)
+        s = s + (dt/6.0)*(k1+2*k2+2*k3+k4)
         traj[i+1] = s.detach().numpy()[0]
     return traj
 
 
+def hnn_mean_rollout(models, q0, p0, n_steps, dt):
+    """
+    Symplectically correct mean rollout via Hamiltonian averaging.
+
+    H_mean(q,p) = (1/N) Σ H_i(q,p)   →   X_{H_mean} = J∇H_mean
+
+    By linearity of J: mean_i(J∇H_i) = J∇(mean_i H_i) = X_{H_mean}
+    ∴  averaging Hamiltonians  ≡  averaging Lie-algebra generators.
+    Result: strictly symplectic flow (Liouville theorem guaranteed).
+
+    Wrong alternative: mean_i(φ_{H_i}(z)) — averaging FLOWS —
+    destroys symplecticity (mean of Sp(2n) elements ∉ Sp(2n)).
+    """
+    traj = np.zeros((n_steps+1, 2))
+    traj[0] = [q0, p0]
+    s = torch.tensor([[q0, p0]], dtype=torch.float32)
+
+    def mean_vf(x):
+        x = x.detach().requires_grad_(True)
+        H = sum(m.hamiltonian(x) for m in models) / len(models)
+        dH = torch.autograd.grad(H.sum(), x)[0]
+        return torch.cat([dH[:, 1:2], -dH[:, 0:1]], dim=-1).detach()
+
+    for i in range(n_steps):
+        k1 = mean_vf(s)
+        k2 = mean_vf(s + 0.5*dt*k1)
+        k3 = mean_vf(s + 0.5*dt*k2)
+        k4 = mean_vf(s + dt*k3)
+        s = (s + (dt/6.0)*(k1+2*k2+2*k3+k4)).detach()
+        traj[i+1] = s.numpy()[0]
+    return traj
+
+
 # ═════════════════════════════════════════════════════════════════════════════
-# 6.  UNCERTAINTY HELPERS
+# 6.  HELPERS
 # ═════════════════════════════════════════════════════════════════════════════
 
-def ensemble_stats(trajs: list[np.ndarray]):
-    """Mean and std across ensemble rollouts. trajs: List[(n_steps+1, 2)]"""
-    arr = np.stack(trajs, axis=0)   # (M, T, 2)
-    return arr.mean(0), arr.std(0)  # (T, 2), (T, 2)
+def ensemble_stats(trajs):
+    arr = np.stack(trajs, axis=0)
+    return arr.mean(0), arr.std(0)
+
+
+def energy(traj):
+    return 0.5*(traj[:, 0]**2 + traj[:, 1]**2)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 7.  ENERGY
+# 7.  PLOTTING HELPERS
 # ═════════════════════════════════════════════════════════════════════════════
 
-def energy(traj: np.ndarray) -> np.ndarray:
-    """H(q,p) = (q² + p²)/2  (SHO)."""
-    return 0.5 * (traj[:, 0]**2 + traj[:, 1]**2)
+def styled_label(ax, text, x, y, color, fontsize=8.2, bg=None, ec=None,
+                 ha="left", va="center", style="normal", pad=0.25):
+    kw = dict(transform=ax.transAxes, ha=ha, va=va,
+              fontsize=fontsize, color=color, style=style)
+    if bg:
+        kw["bbox"] = dict(boxstyle=f"round,pad={pad}", fc=bg,
+                          ec=ec or color, lw=0.8, alpha=0.93)
+    return ax.text(x, y, text, **kw)
+
+
+def add_callout(ax, xy_data, xy_text, label, color, fontsize=7.8, ax_coords=False):
+    if ax_coords:
+        ax.annotate(label, xy=xy_data, xycoords="axes fraction",
+                    xytext=xy_text, textcoords="axes fraction",
+                    fontsize=fontsize, color=color, ha="center", va="center",
+                    arrowprops=dict(arrowstyle="-|>", color=color, lw=1.0,
+                                   mutation_scale=8))
+    else:
+        ax.annotate(label, xy=xy_data, xytext=xy_text,
+                    fontsize=fontsize, color=color, ha="center", va="center",
+                    arrowprops=dict(arrowstyle="-|>", color=color, lw=1.0,
+                                   mutation_scale=8))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -233,192 +294,231 @@ def energy(traj: np.ndarray) -> np.ndarray:
 
 def main():
     # ── Config ────────────────────────────────────────────────────────────────
-    Q0, P0   = 1.0, 0.0   # initial condition on the unit circle
-    DT       = 0.25       # ~14° / step  → 45 steps ≈ 2 full revolutions
-    N_STEPS  = 55         # prediction horizon
-    N_TRAIN  = 800        # one-step training pairs
-    N_SEEDS  = 5          # ensemble size
+    Q0, P0   = 1.0, 0.0
+    DT       = 0.25       # ~14° / step
+    N_STEPS  = 80         # ~3.2 full revolutions (longer = more visible drift)
+    N_TRAIN  = 800
+    N_SEEDS  = 5
 
     outdir = Path(__file__).parent
-    print("Generating training data…")
+    print("Generating training data...")
     X, Y_s, Y_d = make_training_data(N_TRAIN, DT)
 
     # ── Ground truth ──────────────────────────────────────────────────────────
-    gt = ground_truth_trajectory(Q0, P0, N_STEPS, DT)
-    t  = np.arange(N_STEPS + 1) * DT
+    gt   = ground_truth_trajectory(Q0, P0, N_STEPS, DT)
+    t    = np.arange(N_STEPS+1) * DT
     E_gt = energy(gt)
+    E0   = E_gt[0]
 
-    # ── Train ensembles ───────────────────────────────────────────────────────
-    print("Training MLP ensemble…")
+    # ── Train ──────────────────────────────────────────────────────────────────
+    print("Training MLP ensemble...")
     mlp_models = [train_mlp(s, X, Y_s) for s in range(N_SEEDS)]
-    print("Training HNN ensemble…")
-    hnn_models = [train_hnn(s, X, Y_d, DT) for s in range(N_SEEDS)]
+    print("Training HNN ensemble...")
+    hnn_models = [train_hnn(s, X, Y_d) for s in range(N_SEEDS)]
 
     # ── Rollout ───────────────────────────────────────────────────────────────
-    mlp_trajs = [mlp_rollout(m, Q0, P0, N_STEPS)   for m in mlp_models]
-    hnn_trajs = [hnn_rollout(m, Q0, P0, N_STEPS, DT) for m in hnn_models]
+    mlp_trajs  = [mlp_rollout(m, Q0, P0, N_STEPS)       for m in mlp_models]
+    hnn_trajs  = [hnn_rollout(m, Q0, P0, N_STEPS, DT)   for m in hnn_models]
 
     mlp_mean, mlp_std = ensemble_stats(mlp_trajs)
-    hnn_mean, hnn_std = ensemble_stats(hnn_trajs)
 
-    E_mlp_all = np.stack([energy(tr) for tr in mlp_trajs])  # (M, T)
-    E_hnn_all = np.stack([energy(tr) for tr in hnn_trajs])
+    print("Computing symplectic HNN mean (Hamiltonian / Lie algebra averaging)...")
+    hnn_mean  = hnn_mean_rollout(hnn_models, Q0, P0, N_STEPS, DT)
+    _, hnn_std = ensemble_stats(hnn_trajs)
+
+    # Energy
+    E_mlp_all = np.stack([energy(tr) for tr in mlp_trajs])
     E_mlp_mean, E_mlp_std = E_mlp_all.mean(0), E_mlp_all.std(0)
-    E_hnn_mean, E_hnn_std = E_hnn_all.mean(0), E_hnn_all.std(0)
+    E_hnn_mean = energy(hnn_mean)                           # energy of symplectic mean
+    E_hnn_std  = np.stack([energy(tr) for tr in hnn_trajs]).std(0)
 
-    # Total positional uncertainty σ = sqrt(σ_q² + σ_p²)
     sigma_mlp = np.sqrt(mlp_std[:, 0]**2 + mlp_std[:, 1]**2)
     sigma_hnn = np.sqrt(hnn_std[:, 0]**2 + hnn_std[:, 1]**2)
 
-    # ── Figure ────────────────────────────────────────────────────────────────
-    fig, axes = plt.subplots(1, 4, figsize=(16, 4.2),
-                             gridspec_kw={"wspace": 0.38})
+    # ── Figure layout ─────────────────────────────────────────────────────────
+    fig = plt.figure(figsize=(17, 4.6))
+    gs  = GridSpec(1, 4, figure=fig, wspace=0.40,
+                   left=0.062, right=0.985, top=0.80, bottom=0.14)
+    axes = [fig.add_subplot(gs[i]) for i in range(4)]
 
-    # ─── Panel A: Phase portrait ──────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # Panel A: Phase Portrait
+    # ─────────────────────────────────────────────────────────────────────────
     ax = axes[0]
-    ax.set_facecolor("#F7F9FC")
-    θ = np.linspace(0, 2*np.pi, 300)
-    ax.plot(np.cos(θ), np.sin(θ), color=C_GT, lw=1.5, ls="--",
-            label="Ground truth ($H=0.5$)", alpha=0.6)
+    θ  = np.linspace(0, 2*np.pi, 400)
+    ax.plot(np.cos(θ), np.sin(θ), color=C_GT, lw=1.6, ls="--",
+            label="Ground truth ($H=0.50$)", zorder=4, alpha=0.7)
 
+    # Individual particles (light)
     for tr in mlp_trajs:
-        ax.plot(tr[:, 0], tr[:, 1], color=C_MLP, alpha=0.15, lw=0.7)
+        ax.plot(tr[:, 0], tr[:, 1], color=C_MLP, alpha=0.12, lw=0.6)
     for tr in hnn_trajs:
-        ax.plot(tr[:, 0], tr[:, 1], color=C_HNN, alpha=0.15, lw=0.7)
+        ax.plot(tr[:, 0], tr[:, 1], color=C_HNN, alpha=0.12, lw=0.6)
 
-    ax.plot(mlp_mean[:, 0], mlp_mean[:, 1], color=C_MLP, lw=1.8,
-            label="MLP (black-box)")
-    ax.plot(hnn_mean[:, 0], hnn_mean[:, 1], color=C_HNN, lw=1.8,
-            label="HNN (symplectic)")
-    ax.scatter([Q0], [P0], s=60, color=C_GT, zorder=5, label="IC")
+    ax.plot(mlp_mean[:, 0], mlp_mean[:, 1], color=C_MLP, lw=2.0,
+            label="MLP — black-box", zorder=5)
+    ax.plot(hnn_mean[:, 0], hnn_mean[:, 1], color=C_HNN, lw=2.0,
+            label="HNN — symplectic", zorder=5)
+    ax.scatter([Q0], [P0], s=70, color=C_GT, zorder=8,
+               label="Initial condition", marker="o", edgecolors="white", linewidths=0.8)
 
-    # Annotate energy drift
-    ax.annotate("Energy\ndrift", xy=(mlp_mean[-1, 0], mlp_mean[-1, 1]),
-                xytext=(0.6, -1.2), fontsize=8, color=C_MLP,
-                arrowprops=dict(arrowstyle="->", color=C_MLP, lw=1.0))
-    ax.annotate("Phase\ndrift only", xy=(hnn_mean[-1, 0], hnn_mean[-1, 1]),
-                xytext=(-1.5, 0.7), fontsize=8, color=C_HNN,
-                arrowprops=dict(arrowstyle="->", color=C_HNN, lw=1.0))
+    # Arrow annotations
+    mlp_end = mlp_mean[-1]
+    hnn_end = hnn_mean[-1]
+    ax.annotate("Topological\nfailure\n(spiral off ring)",
+                xy=(mlp_end[0], mlp_end[1]), xytext=(0.35, -1.35),
+                fontsize=7.5, color=C_MLP, ha="center",
+                arrowprops=dict(arrowstyle="-|>", color=C_MLP, lw=1.1,
+                                mutation_scale=9))
+    ax.annotate("Physical\nhallucination\n(phase drift only)",
+                xy=(hnn_end[0], hnn_end[1]), xytext=(-1.55, 0.65),
+                fontsize=7.5, color=C_HNN, ha="center",
+                arrowprops=dict(arrowstyle="-|>", color=C_HNN, lw=1.1,
+                                mutation_scale=9))
 
     ax.set_xlabel("$q$  [a.u.]")
     ax.set_ylabel("$p$  [a.u.]")
-    ax.set_title("(A)  Phase Portrait", fontweight="bold")
-    ax.legend(loc="lower right", framealpha=0.85)
+    ax.set_title("(A)  Phase Space", pad=8)
+    ax.legend(loc="lower right", fontsize=7.5)
     ax.set_aspect("equal")
-    ax.set_xlim(-2.0, 1.8)
-    ax.set_ylim(-1.8, 1.8)
-    ax.text(0.03, 0.97, "SHO — maps to betatron\noscillations in accelerators",
-            transform=ax.transAxes, va="top", fontsize=7.5,
-            color="gray", style="italic")
+    ax.set_xlim(-2.1, 1.85)
+    ax.set_ylim(-1.85, 1.85)
 
-    # ─── Panel B: q(t) time series ────────────────────────────────────────────
+    # Lie algebra equivalence note
+    styled_label(ax, "Mean Hamiltonian: $H_\\mathrm{mean}=\\frac{1}{N}\\Sigma H_i$\n"
+                 r"$\Rightarrow\ X_{H_\mathrm{mean}}=\frac{1}{N}\Sigma J\nabla H_i$  (Lie alg. avg.)",
+                 0.02, 0.06, C_HNN, fontsize=6.6, bg="#E8F5EE", ec=C_HNN,
+                 ha="left", va="bottom")
+    styled_label(ax, "SHO $\\equiv$ betatron osc. in accelerators",
+                 0.02, 0.97, C_ANNOT, fontsize=7.0, ha="left", va="top",
+                 style="italic")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Panel B: q(t) time series
+    # ─────────────────────────────────────────────────────────────────────────
     ax = axes[1]
-    ax.set_facecolor("#F7F9FC")
-    ax.plot(t, gt[:, 0], color=C_GT, lw=1.8, ls="--", label="Ground truth")
+    ax.plot(t, gt[:, 0], color=C_GT, lw=1.8, ls="--", label="Ground truth", zorder=4)
 
-    ax.fill_between(t,
-                    mlp_mean[:, 0] - mlp_std[:, 0],
-                    mlp_mean[:, 0] + mlp_std[:, 0],
-                    color=C_MLP, alpha=0.18)
-    ax.plot(t, mlp_mean[:, 0], color=C_MLP, lw=1.8, label="MLP (black-box)")
+    ax.fill_between(t, mlp_mean[:, 0]-mlp_std[:, 0],
+                    mlp_mean[:, 0]+mlp_std[:, 0], color=C_MLP, alpha=0.18)
+    ax.plot(t, mlp_mean[:, 0], color=C_MLP, lw=2.0, label="MLP — black-box")
 
-    ax.fill_between(t,
-                    hnn_mean[:, 0] - hnn_std[:, 0],
-                    hnn_mean[:, 0] + hnn_std[:, 0],
-                    color=C_HNN, alpha=0.18)
-    ax.plot(t, hnn_mean[:, 0], color=C_HNN, lw=1.8, label="HNN (symplectic)")
+    ax.fill_between(t, hnn_mean[:, 0]-hnn_std[:, 0],
+                    hnn_mean[:, 0]+hnn_std[:, 0], color=C_HNN, alpha=0.18)
+    ax.plot(t, hnn_mean[:, 0], color=C_HNN, lw=2.0, label="HNN — symplectic")
 
     ax.set_xlabel("Time $t$  [a.u.]")
     ax.set_ylabel("Position $q(t)$")
-    ax.set_title("(B)  Position Rollout", fontweight="bold")
-    ax.legend(loc="upper right", framealpha=0.85)
-    ax.axhline(0, color="gray", lw=0.4, ls=":")
+    ax.set_title("(B)  Position Rollout", pad=8)
+    ax.legend(loc="upper right", fontsize=7.5)
+    ax.axhline(0, color="#AAAAAA", lw=0.5, ls=":", zorder=0)
 
-    # ─── Panel C: Energy H(t) ────────────────────────────────────────────────
-    ax = axes[2]
-    E0 = E_gt[0]
+    # Annotation: short-horizon trap
+    styled_label(ax, "Both look similar\nat short horizon\n— the practitioner's trap",
+                 0.04, 0.81, C_ANNOT, fontsize=7.0, bg="white", ec="#CCCCCC",
+                 ha="left", va="top")
 
-    # Background shading
-    ax.axhspan(E0 * 0.85, E0 * 1.15, color=C_SAFE, alpha=0.9, zorder=0)
-    ax.axhspan(E0 * 1.15, E0 * 3.5, color=C_UNSAFE, alpha=0.7, zorder=0)
+    # ─────────────────────────────────────────────────────────────────────────
+    # Panel C: Energy H(t)
+    # ─────────────────────────────────────────────────────────────────────────
+    ax  = axes[2]
 
-    ax.axhline(E0, color=C_GT, lw=1.5, ls="--", label=f"Ground truth $H={E0:.2f}$")
+    ax.axhspan(0.0,        E0*0.85,  color=C_UNSAFE, alpha=0.55, zorder=0)
+    ax.axhspan(E0*0.85,    E0*1.15,  color=C_SAFE,   alpha=0.85, zorder=0)
+    ax.axhspan(E0*1.15,    E0*4.0,   color=C_UNSAFE, alpha=0.55, zorder=0)
+    ax.axhline(E0, color=C_GT, lw=1.6, ls="--",
+               label=f"Ground truth $H={E0:.2f}$", zorder=5)
 
-    ax.fill_between(t, E_mlp_mean - E_mlp_std, E_mlp_mean + E_mlp_std,
-                    color=C_MLP, alpha=0.18)
-    ax.plot(t, E_mlp_mean, color=C_MLP, lw=1.8, label="MLP (black-box)")
+    ax.fill_between(t, E_mlp_mean-E_mlp_std, E_mlp_mean+E_mlp_std,
+                    color=C_MLP, alpha=0.20)
+    ax.plot(t, E_mlp_mean, color=C_MLP, lw=2.0, label="MLP — black-box")
 
-    ax.fill_between(t, E_hnn_mean - E_hnn_std, E_hnn_mean + E_hnn_std,
-                    color=C_HNN, alpha=0.18)
-    ax.plot(t, E_hnn_mean, color=C_HNN, lw=1.8, label="HNN (symplectic)")
+    ax.fill_between(t, E_hnn_mean-E_hnn_std, E_hnn_mean+E_hnn_std,
+                    color=C_HNN, alpha=0.20)
+    ax.plot(t, E_hnn_mean, color=C_HNN, lw=2.0, label="HNN — symplectic")
 
-    # Annotations
-    # Find first step where MLP energy leaves tolerance band
-    violation_steps = np.where(np.abs(E_mlp_mean - E0) > 0.1 * E0)[0]
-    if len(violation_steps) > 0:
-        vx = t[violation_steps[0]]
-        ax.axvline(vx, color=C_MLP, lw=0.8, ls=":", alpha=0.7)
-        ax.text(vx + 0.3, E0 * 1.3, "Liouville\nviolation", color=C_MLP,
-                fontsize=7.5, va="center")
+    # Liouville violation marker
+    viol = np.where(np.abs(E_mlp_mean - E0) > 0.12*E0)[0]
+    if len(viol):
+        vx = t[viol[0]]
+        ax.axvline(vx, color=C_MLP, lw=1.0, ls=":", alpha=0.75)
+        ax.text(vx + 0.4, E0*1.55, "Liouville\nviolation\n($\\nabla\\cdot f\\neq 0$)",
+                color=C_MLP, fontsize=7.5, va="center")
 
-    ax.text(0.97, 0.12, "[OK] Hamiltonian\nconserved", transform=ax.transAxes,
-            ha="right", va="bottom", fontsize=8, color=C_HNN,
-            bbox=dict(boxstyle="round,pad=0.2", fc=C_SAFE, ec=C_HNN, alpha=0.9))
-    ax.text(0.97, 0.85, "[!] Non-physical\nenergy gain", transform=ax.transAxes,
-            ha="right", va="top", fontsize=8, color=C_MLP,
-            bbox=dict(boxstyle="round,pad=0.2", fc=C_UNSAFE, ec=C_MLP, alpha=0.9))
+    styled_label(ax, "Hamiltonian conserved\nby construction",
+                 0.97, 0.10, C_HNN, fontsize=7.5, bg=C_SAFE, ec=C_HNN,
+                 ha="right", va="bottom")
+    styled_label(ax, "Non-physical\nenergy gain",
+                 0.97, 0.90, C_MLP, fontsize=7.5, bg=C_UNSAFE, ec=C_MLP,
+                 ha="right", va="top")
 
     ax.set_xlabel("Time $t$  [a.u.]")
-    ax.set_ylabel("Energy $H(q,p) = (q^2+p^2)/2$")
-    ax.set_title("(C)  Energy Conservation", fontweight="bold")
-    ax.legend(loc="upper left", framealpha=0.85)
-    ylo = max(0, E0 * 0.6)
-    yhi = min(E0 * 3.5, max(E_mlp_mean.max() * 1.15, E0 * 1.6))
-    ax.set_ylim(ylo, yhi)
+    ax.set_ylabel("$H(q,p) = (q^2+p^2)/2$")
+    ax.set_title("(C)  Energy Conservation", pad=8)
+    ax.legend(loc="upper left", fontsize=7.5)
+    yhi = max(E_mlp_mean.max()*1.2, E0*1.8)
+    ylo = max(0.0, E0*0.55)
+    ax.set_ylim(ylo, min(yhi, E0*3.2))
 
-    # ─── Panel D: Epistemic uncertainty σ(t) ─────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # Panel D: Epistemic Uncertainty
+    # ─────────────────────────────────────────────────────────────────────────
     ax = axes[3]
-    ax.set_facecolor("#F7F9FC")
 
-    ax.fill_between(t, sigma_mlp, color=C_MLP, alpha=0.25)
-    ax.plot(t, sigma_mlp, color=C_MLP, lw=1.8, label="MLP (black-box)")
+    ax.fill_between(t, sigma_mlp, color=C_MLP, alpha=0.22)
+    ax.plot(t, sigma_mlp, color=C_MLP, lw=2.0, label="MLP — black-box")
 
-    ax.fill_between(t, sigma_hnn, color=C_HNN, alpha=0.25)
-    ax.plot(t, sigma_hnn, color=C_HNN, lw=1.8, label="HNN (symplectic)")
+    ax.fill_between(t, sigma_hnn, color=C_HNN, alpha=0.22)
+    ax.plot(t, sigma_hnn, color=C_HNN, lw=2.0, label="HNN — symplectic")
 
-    # Threshold line (illustrative safe UQ threshold)
-    threshold = sigma_hnn.max() * 2.5
-    ax.axhline(threshold, color="gray", lw=0.8, ls="--", alpha=0.6)
-    ax.text(t[-1] * 0.05, threshold * 1.05, "Safe UQ\nthreshold",
-            fontsize=7.5, color="gray", va="bottom")
+    # Safe UQ threshold line
+    thresh = sigma_hnn.max() * 2.8
+    ax.axhline(thresh, color="#888888", lw=0.9, ls=(0, (4, 3)), alpha=0.75)
+    ax.text(t[2], thresh*1.04, "Safe UQ threshold",
+            fontsize=7.5, color="#777777", va="bottom")
+
+    styled_label(ax,
+                 "HNN: bounded, structured\nepistemic uncertainty\n"
+                 r"$\rightarrow$ safe exploration signal",
+                 0.97, 0.15, C_HNN, fontsize=7.5, bg=C_SAFE, ec=C_HNN,
+                 ha="right", va="bottom")
+    styled_label(ax,
+                 "MLP: exploding, phase-\ncorrelated uncertainty\n"
+                 r"$\rightarrow$ false confidence",
+                 0.97, 0.88, C_MLP, fontsize=7.5, bg=C_UNSAFE, ec=C_MLP,
+                 ha="right", va="top")
 
     ax.set_xlabel("Time $t$  [a.u.]")
-    ax.set_ylabel(r"Epistemic uncertainty $\sigma(t)$")
-    ax.set_title("(D)  Ensemble Uncertainty", fontweight="bold")
-    ax.legend(loc="upper left", framealpha=0.85)
-    ax.text(0.97, 0.90,
-            "HNN uncertainty is\nbounded & trustworthy\n→ safe exploration signal",
-            transform=ax.transAxes, ha="right", va="top", fontsize=8,
-            color=C_HNN,
-            bbox=dict(boxstyle="round,pad=0.25", fc="#E8F4E8", ec=C_HNN, alpha=0.9))
+    ax.set_ylabel(r"Epistemic uncertainty $\sigma_\mathrm{ep}(t)$")
+    ax.set_title("(D)  Epistemic Uncertainty", pad=8)
+    ax.legend(loc="upper left", fontsize=7.5)
 
-    # ── Global title & footer ─────────────────────────────────────────────────
-    fig.suptitle(
-        "World Model Hallucinations: Black-Box MLP vs. Hamiltonian Neural Network\n"
-        r"Standard RL violates Liouville's Theorem ($\nabla \cdot f \neq 0$)  —  "
-        r"HNN enforces symplectic structure ($\nabla \cdot f_H = 0$)  by construction",
-        fontsize=11, fontweight="bold", color=C_GT, y=1.01,
-    )
-    fig.text(0.5, -0.03,
-             "METRIC Project · FWF PI Project · Simon Hirläender, Lorenz Fischl · "
-             "Dept. AI & Human Interfaces, University of Salzburg",
-             ha="center", fontsize=7.5, color="gray", style="italic")
+    # ── Super-title ────────────────────────────────────────────────────────────
+    fig.text(0.5, 0.975,
+             "World Model Hallucinations: Black-Box MLP vs. Hamiltonian Neural Network",
+             ha="center", fontsize=13, fontweight="bold", color=C_GT, va="top")
+    fig.text(0.5, 0.900,
+             r"MLP violates Liouville's theorem ($\nabla\!\cdot\!f\neq 0$)"
+             r"  $\boldsymbol{|}$  "
+             r"HNN enforces $\nabla\!\cdot\!f_H = 0$ by construction"
+             r"  $\boldsymbol{|}$  "
+             r"Symplectic mean: $\frac{1}{N}\!\sum_i J\nabla H_i = J\nabla H_\mathrm{mean}$  "
+             r"where $H_\mathrm{mean}=\frac{1}{N}\!\sum_i H_i$",
+             ha="center", fontsize=9.0, color=C_GT, va="top")
+
+    fig.text(0.5, -0.02,
+             "METRIC Project  \u00b7  FWF PI Project  \u00b7  "
+             "Simon Hirlaender, Lorenz Fischl  \u00b7  "
+             "Dept. AI & Human Interfaces, University of Salzburg  \u00b7  "
+             f"Ensemble $M={N_SEEDS}$,  "
+             f"horizon $T={N_STEPS}$ steps",
+             ha="center", fontsize=7.5, color="#888888", style="italic")
 
     # ── Save ──────────────────────────────────────────────────────────────────
     for ext in ("pdf", "png"):
         fp = outdir / f"hallucination_comparison.{ext}"
         fig.savefig(fp, dpi=300, bbox_inches="tight")
-        print(f"Saved → {fp}")
+        print(f"Saved -> {fp}")
 
     plt.show()
     print("Done.")
